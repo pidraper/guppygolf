@@ -11,7 +11,7 @@ pip install -r requirements.txt
 python main.py
 ```
 
-Python 3.10 through 3.13 is required, together with a display and OpenGL 3.3.[^2]
+Python 3.10 through 3.13 is required, together with a display and OpenGL 3.3.
 
 ## Controls
 
