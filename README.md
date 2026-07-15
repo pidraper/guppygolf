@@ -2,7 +2,7 @@
 
 Mini-golf at large hbar. The ball is a Gaussian wavepacket, putted across a two-dimensional potential on a 16×16 grid. Each stroke compiles a quantum circuit in Guppy, runs it once on the Selene emulator,[^1] and reads the packet back at every step. Brightness = |ψ|², hue = phase.  The stopping point is sampled from |ψ|².
 
-Six angry detectors guard the course. When a mid-circuit measurement finds the packet inside a watched cell, the hole flees to another burrow.
+Six angry detectors guard the course, making periodic local measurements. When a mid-circuit measurement finds the packet inside a watched cell, the hole flees to another burrow.
 
 ## Install
 

@@ -7,7 +7,6 @@ import numpy as np
 import pyglet
 from render.coords import px_to_grid
 from game.mechanics import (
-    n_steps_for,
     sample_landing,
     resolve,
     gate_count,
@@ -58,7 +57,6 @@ class Loop:
         d = math.hypot(dx, dy) or 1.0
         mag = min(d / 6.0, 1.0) * self.cfg.k_max
         self.st.kx, self.st.ky = mag * dx / d, mag * dy / d
-        self.st.n_steps = n_steps_for(self.cfg, self.st.kx, self.st.ky)
 
     def on_squash(self, sy):
         if self.st.phase != Phase.AIMING:

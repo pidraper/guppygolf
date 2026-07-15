@@ -1,14 +1,6 @@
-import math
 import numpy as np
 from game.state import Phase
 from game.headless import won
-
-
-def n_steps_for(cfg, kx, ky):
-    k = math.hypot(kx, ky)
-    frac = min(k, cfg.k_max) / cfg.k_max
-    n = round(cfg.n_steps_floor + frac * (cfg.n_steps_max - cfg.n_steps_floor))
-    return int(min(max(n, cfg.n_steps_floor), cfg.n_steps_max))
 
 
 def sample_landing(prob, rng):

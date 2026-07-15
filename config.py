@@ -10,9 +10,7 @@ class Config:
         10.0
     )
     dt: float = 0.005
-    n_steps_default: int = 18
-    n_steps_max: int = 60
-    n_steps_floor: int = 12
+    n_steps_default: int = 180
     sigma_0: float = (
         0.07
     )
@@ -25,7 +23,7 @@ class Config:
     s_step: float = 1.1
     potential_preset: str = "bowl_barrier"
     boundary_wall: bool = True
-    detector_period: int = 4
+    detector_period: int = 10
     detector_n_points: int = 6
     detector_rect: tuple = (
         8,
