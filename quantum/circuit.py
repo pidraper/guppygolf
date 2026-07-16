@@ -73,13 +73,24 @@ def walsh_term_counts(cfg):
 
 
 def build_turn(
-    cfg, x0, y0, kx, ky, sigma_x, sigma_y, conditions, n_steps, detector_period
+    cfg,
+    x0,
+    y0,
+    kx,
+    ky,
+    sigma_x,
+    sigma_y,
+    conditions,
+    n_steps,
+    detector_period,
+    detector_offset,
 ):
     n = n_qubits_per_axis(cfg.grid_n)
     N = cfg.grid_n
     nb = len(cfg.burrows)
     assert nb == 3, "this reference body is unrolled for exactly 3 burrows"
     period = detector_period
+    offset = detector_offset
 
 
     px = prepare_amplitudes_gates(gaussian_amplitudes(N, x0, sigma_x, cfg.L))
@@ -162,7 +173,7 @@ def build_turn(
             elif hole_idx == 2:
                 vhalf2(qs)
 
-            if (t % comptime(period)) == 0:
+            if (t % comptime(period)) == comptime(offset):
                 flag = qubit()
                 anc = array(qubit() for _ in range(comptime(n_anc)))
                 detector_emit(qs, flag, anc)
@@ -253,6 +264,7 @@ def run_turn(cfg, params, seed=1):
         conditions,
         params.n_steps,
         cfg.detector_period,
+        cfg.detector_offset,
     )
     d = _run_turn_raw(circuit, meta, seed)
     return TurnResult(

@@ -23,8 +23,9 @@ class Config:
     s_step: float = 1.1
     potential_preset: str = "bowl_barrier"
     boundary_wall: bool = True
-    detector_period: int = 8
-    detector_n_points: int = 12
+    detector_period: int = 10
+    detector_offset: int = 5
+    detector_n_points: int = 10
     detector_rect: tuple = (
         8,
         11,
