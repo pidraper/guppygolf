@@ -45,11 +45,17 @@ PRESETS = {
 
 
 def _boundary_wall(cfg, X, Y):
+
+
+
+
+
+
+
+
     edge = cfg.L / cfg.grid_n
     d = np.minimum.reduce([X, Y, cfg.L - X - edge, cfg.L - Y - edge])
-    return 600.0 * np.exp(
-        -d / (cfg.L / 20)
-    )
+    return 110.0 * np.exp(-d / (2 * cfg.L / cfg.grid_n))
 
 
 def hole_region(cfg, hole_idx):
