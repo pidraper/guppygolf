@@ -45,6 +45,7 @@ class Config:
     r_hole: float = 1.5
     max_strokes: int = 10
     frame_ms: int = 60
+    streaming: bool = True
     walsh_rms_tol: float = 0.01
     field_gamma: float = (
         1.4

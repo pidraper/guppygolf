@@ -13,12 +13,31 @@ from game.mechanics import (
     tick_counter,
 )
 from quantum.preview import preview_field
-from quantum.circuit import run_turn, TurnParams, walsh_term_counts
+from quantum.circuit import run_turn, TurnParams, walsh_term_counts, stream_turn
+import threading
+
+from game.stream import StreamingResult, consume
 
 
-def fire(cfg, st, pool):
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+def build_params(cfg, st):
     dx = cfg.L / cfg.grid_n
-    p = TurnParams(
+    return TurnParams(
         x0=st.lie[0] * dx,
         y0=st.lie[1] * dx,
         kx=st.kx,
@@ -28,7 +47,6 @@ def fire(cfg, st, pool):
         hole_idx=st.hole_idx,
         detector_cells=st.detector_cells,
     )
-    return pool.submit(run_turn, cfg, p)
 
 
 class Loop:
@@ -41,12 +59,15 @@ class Loop:
         self._size = size
         self._pool = concurrent.futures.ThreadPoolExecutor(max_workers=1)
         self._future = None
+        self._abort = None
         self._rng = np.random.default_rng(1)
         self._walsh_counts = walsh_term_counts(cfg)
         self._gate_target = 0
         self._gate_shown = 0.0
         self._speed = 1.0
-        self.st.detector_cells = course.pick_detector_cells(cfg, self._detector_rng, self.st.lie)
+        self.st.detector_cells = course.pick_detector_cells(
+            cfg, self._detector_rng, self.st.lie
+        )
 
 
     def on_aim(self, px, py):
@@ -68,6 +89,8 @@ class Loop:
         self.st.s = min(max(self.st.s, self.cfg.s_min), self.cfg.s_max)
 
     def on_reset(self):
+        if self._abort is not None:
+            self._abort.set()
         pyglet.clock.unschedule(self._poll_compute)
         pyglet.clock.unschedule(self._tick)
         self.st = GameState(
@@ -93,7 +116,16 @@ class Loop:
 
     def on_putt(self):
         if self.st.phase == Phase.AIMING:
-            self._future = fire(self.cfg, self.st, self._pool)
+            p = build_params(self.cfg, self.st)
+            if self.cfg.streaming:
+                self._abort = threading.Event()
+                self.result = StreamingResult()
+                self._future = self._pool.submit(
+                    consume, stream_turn(self.cfg, p), self.result, self._abort
+                )
+            else:
+                self._abort = None
+                self._future = self._pool.submit(run_turn, self.cfg, p)
             self._gate_target = gate_count(
                 self.cfg, self.st.n_steps, self._walsh_counts
             )
@@ -108,33 +140,54 @@ class Loop:
 
 
     def _poll_compute(self, dt):
-        if not self._future.done():
-            self._gate_shown = tick_counter(self._gate_shown, self._gate_target)
-            return
-        pyglet.clock.unschedule(self._poll_compute)
-        exc = self._future.exception()
-        if exc is not None:
+        if self._future.done() and self._future.exception() is not None:
+            pyglet.clock.unschedule(self._poll_compute)
             self.st.phase = Phase.ERROR
-            self.st.message = str(exc)
+            self.st.message = str(self._future.exception())
             return
-        self.result = self._future.result()
-        self._gate_shown = float(self._gate_target)
-        self._frame = 0
-        self.st.phase = Phase.SIMULATING
-        self.st.message = ""
-        pyglet.clock.schedule_interval(
-            self._tick, self.cfg.frame_ms / 1000.0 / self._speed
-        )
+        if self.cfg.streaming:
+            ready = len(self.result.snapshots) > 0
+        else:
+            ready = self._future.done()
+            if ready:
+                self.result = self._future.result()
+        if ready:
+            pyglet.clock.unschedule(self._poll_compute)
+            self._frame = 0
+            self.st.phase = Phase.SIMULATING
+            self.st.message = ""
+            pyglet.clock.schedule_interval(
+                self._tick, self.cfg.frame_ms / 1000.0 / self._speed
+            )
+        elif self._future.done():
+
+            pyglet.clock.unschedule(self._poll_compute)
+            self.st.phase = Phase.ERROR
+            self.st.message = "no frames received"
+        else:
+            self._gate_shown = tick_counter(self._gate_shown, self._gate_target)
+
 
 
 
     def _tick(self, dt):
         if self._frame < len(self.result.snapshots) - 1:
             self._frame += 1
-        else:
-            self._stop_at(self._frame)
+            self._gate_shown = (
+                self._gate_target * len(self.result.snapshots) / max(self.st.n_steps, 1)
+            )
+        elif self._future.done():
+            if self._future.exception() is not None:
+                pyglet.clock.unschedule(self._tick)
+                self.st.phase = Phase.ERROR
+                self.st.message = str(self._future.exception())
+            else:
+                self._stop_at(self._frame)
+
 
     def _stop_at(self, frame):
+        if self._abort is not None:
+            self._abort.set()
         if self.st.phase != Phase.SIMULATING:
             return
         pyglet.clock.unschedule(self._tick)
@@ -159,7 +212,7 @@ class Loop:
                 zeros, zeros
             )
             flash = False
-            hole_idx = self.result.hole_trace[-1]
+            hole_idx = st.hole_idx
         else:
             dx = self.cfg.L / self.cfg.grid_n
             mag, phase = preview_field(

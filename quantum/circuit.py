@@ -1,5 +1,32 @@
 from dataclasses import dataclass
 import numpy as np
+from pathlib import Path
+from guppylang.emulator.state import NotSingleStateError, PartialVector
+from selene_quest_plugin.state import SeleneQuestState
+from guppylang import guppy
+from guppylang.std.builtins import array, comptime, result
+from guppylang.std.quantum import qubit, measure, measure_array, discard_array
+from guppylang.std.debug import state_result
+
+
+from quantum.grid import n_qubits_per_axis
+from quantum.state_prep import (
+    gaussian_amplitudes,
+    prepare_amplitudes_gates,
+    apply_prep_gates,
+    apply_kick,
+)
+from quantum.qft import qft, iqft
+from quantum.kinetic import kinetic_coeffs, apply_kinetic
+from quantum.potential import walsh_terms, apply_diagonal_phase
+from quantum.detectors import (
+    detector_flip_q,
+    dyadic_conditions,
+    detector_flip_box,
+    mcx_into_ancillas,
+    point_conditions,
+)
+from game.course import build_potential
 
 
 @dataclass
@@ -32,32 +59,6 @@ def stabilized_phase(amp2d):
     ref = ph.flat[int(np.argmax(np.abs(amp2d)))]
     return ph - ref
 
-
-import numpy as np
-from guppylang import guppy
-from guppylang.std.builtins import array, comptime, result
-from guppylang.std.quantum import qubit, measure, measure_array, discard_array
-from guppylang.std.debug import state_result
-from guppylang.emulator.state import NotSingleStateError
-
-from quantum.grid import n_qubits_per_axis
-from quantum.state_prep import (
-    gaussian_amplitudes,
-    prepare_amplitudes_gates,
-    apply_prep_gates,
-    apply_kick,
-)
-from quantum.qft import qft, iqft
-from quantum.kinetic import kinetic_coeffs, apply_kinetic
-from quantum.potential import walsh_terms, apply_diagonal_phase
-from quantum.detectors import (
-    detector_flip_q,
-    dyadic_conditions,
-    detector_flip_box,
-    mcx_into_ancillas,
-    point_conditions,
-)
-from game.course import build_potential
 
 WALSH_TOL = 1e-2
 
@@ -194,7 +195,7 @@ def build_turn(
         n_steps=n_steps,
         period=period,
         n_qubits=n_qubits,
-        detector_steps=[t for t in range(n_steps) if t % period == 0],
+        detector_steps=[t for t in range(n_steps) if t % period == offset],
     )
     return circuit, meta
 
@@ -208,73 +209,180 @@ def _snapshot_amp(vec, N):
     return amp.reshape(N, N)
 
 
-def _run_turn_raw(circuit, meta, seed=1):
-    n, N = meta["n"], meta["N"]
-    res = (
-        circuit.emulator(n_qubits=meta["n_qubits"]).with_seed(seed).with_shots(1).run()
-    )
-    shot = res.collated_shots()[0]
 
 
-    snaps = []
-    phases = []
-    for _tag, vec in res.partial_states()[0]:
-        amp = _snapshot_amp(
-            vec, N
-        )
-        snaps.append(np.abs(amp) ** 2)
-        phases.append(stabilized_phase(amp))
-
-    det_trace = [int(d) for d in shot["det"]]
-    detections = [bool(d) for d in det_trace]
-    detect_at_step = [meta["detector_steps"][i] for i, d in enumerate(det_trace) if d]
-    hole_trace = [int(h) for h in shot["hole"]]
-    final_hole_idx = int(shot["hole_final"][0])
-
-    bits = [int(b) for b in shot["land"][0]]
-    jx = int("".join(str(b) for b in bits[:n]), 2)
-    jy = int("".join(str(b) for b in bits[n:]), 2)
-
-    return dict(
-        snapshots=snaps,
-        phase_snapshots=phases,
-        landing=(jx, jy),
-        detections=detections,
-        detect_at_step=detect_at_step,
-        hole_trace=hole_trace,
-        final_hole_idx=final_hole_idx,
-    )
 
 
-def run_turn(cfg, params, seed=1):
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+@dataclass
+class StepFrame:
+
+    prob: np.ndarray
+    phase: np.ndarray
+    hole_idx: int
+    det: "bool | None"
+
+
+@dataclass
+class TurnEnd:
+
+    landing: tuple
+    final_hole_idx: int
+
+
+def stream_turn(cfg, params, seed=1):
     assert params.s > 0, "squash factor s must be positive"
     n = n_qubits_per_axis(cfg.grid_n)
     conditions = point_conditions(params.detector_cells, n)
     root_s = params.s**0.5
-    sigma_x = cfg.sigma_0 / root_s
-    sigma_y = cfg.sigma_0 * root_s
     circuit, meta = build_turn(
         cfg,
         params.x0,
         params.y0,
         params.kx,
         params.ky,
-        sigma_x,
-        sigma_y,
+        cfg.sigma_0 / root_s,
+        cfg.sigma_0 * root_s,
         conditions,
         params.n_steps,
         cfg.detector_period,
         cfg.detector_offset,
     )
-    d = _run_turn_raw(circuit, meta, seed)
+    N = meta["N"]
+    inst = circuit.emulator(n_qubits=meta["n_qubits"]).with_seed(seed).with_shots(1)
+
+
+
+    stream = inst._run_instance()
+    shot = next(iter(stream))
+    det = None
+    hole = None
+    final_hole = None
+    try:
+        for tag, value in shot:
+            if tag == "det":
+                det = bool(value)
+            elif tag == "hole":
+                hole = int(value)
+            elif tag == "STATE:snap":
+                state = SeleneQuestState.parse_from_file(Path(value), cleanup=True)
+                amp = _snapshot_amp(PartialVector._from_inner(state), N)
+                yield StepFrame(
+                    prob=np.abs(amp) ** 2,
+                    phase=stabilized_phase(amp),
+                    hole_idx=hole,
+                    det=det,
+                )
+                det = None
+            elif tag == "hole_final":
+                final_hole = int(value)
+            elif tag == "land":
+                bits = [int(b) for b in value]
+                jx = int("".join(str(b) for b in bits[:n]), 2)
+                jy = int("".join(str(b) for b in bits[n:]), 2)
+                yield TurnEnd(landing=(jx, jy), final_hole_idx=final_hole)
+    finally:
+
+
+        shot.close()
+        stream.close()
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+def run_turn(cfg, params, seed=1):
+    items = list(stream_turn(cfg, params, seed))
+    frames = [f for f in items if isinstance(f, StepFrame)]
+    tail = items[-1]
+    assert isinstance(tail, TurnEnd), "complete flight must end in TurnEnd"
     return TurnResult(
-        snapshots=d["snapshots"],
-        phase_snapshots=d["phase_snapshots"],
-        landing=d["landing"],
-        final_hole_idx=d["final_hole_idx"],
-        detections=d["detections"],
+        snapshots=[f.prob for f in frames],
+        phase_snapshots=[f.phase for f in frames],
+        landing=tail.landing,
+        final_hole_idx=tail.final_hole_idx,
+        detections=[f.det for f in frames if f.det is not None],
 
 
-        detect_at_step=meta["detector_steps"],
-        hole_trace=d["hole_trace"],
+        detect_at_step=[i for i, f in enumerate(frames) if f.det is not None],
+        hole_trace=[f.hole_idx for f in frames],
     )
