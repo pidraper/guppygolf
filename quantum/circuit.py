@@ -85,6 +85,7 @@ def build_turn(
     n_steps,
     detector_period,
     detector_offset,
+    hole0=0,
 ):
     n = n_qubits_per_axis(cfg.grid_n)
     N = cfg.grid_n
@@ -155,7 +156,7 @@ def build_turn(
     def circuit() -> None:
         qs = array(qubit() for _ in range(comptime(2 * n)))
         prep_and_kick(qs)
-        hole_idx: int = 0
+        hole_idx: int = comptime(hole0)
         for t in range(comptime(n_steps)):
 
             if hole_idx == 0:
@@ -286,6 +287,7 @@ def stream_turn(cfg, params, seed=1):
         params.n_steps,
         cfg.detector_period,
         cfg.detector_offset,
+        hole0=params.hole_idx,
     )
     N = meta["N"]
     inst = circuit.emulator(n_qubits=meta["n_qubits"]).with_seed(seed).with_shots(1)
