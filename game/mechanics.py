@@ -36,7 +36,7 @@ def resolve(cfg, st, landing, hole_idx):
 
 
 _GATES_PER_WALSH_TERM = 6.5
-_KINETIC_GATES = 135
+_KINETIC_GATES = 111
 _PREP_GATES = 40
 _KICK_GATES = 20
 _DETECTOR_GATES = 30

@@ -4,6 +4,7 @@ from guppylang.std.builtins import array, comptime
 from guppylang.std.quantum import qubit, h, rz, crz, cx, x, discard_array
 from guppylang.std.angles import pi
 from guppylang.std.debug import state_result
+from guppylang.std.mem import mem_swap
 
 
 def cphase(c, t, phi):
@@ -11,10 +12,10 @@ def cphase(c, t, phi):
     crz(c, t, phi)
 
 
-def swap(a, b):
-    cx(a, b)
-    cx(b, a)
-    cx(a, b)
+
+
+
+
 
 
 def qft(reg, n):
@@ -23,12 +24,12 @@ def qft(reg, n):
         for j in range(i + 1, n):
             cphase(reg[j], reg[i], pi / 2 ** (j - i))
     for i in range(n // 2):
-        swap(reg[i], reg[n - 1 - i])
+        mem_swap(reg[i], reg[n - 1 - i])
 
 
 def iqft(reg, n):
     for i in range(n // 2):
-        swap(reg[i], reg[n - 1 - i])
+        mem_swap(reg[i], reg[n - 1 - i])
     for i in reversed(range(n)):
         for j in range(i + 1, n):
             cphase(reg[j], reg[i], -pi / 2 ** (j - i))
