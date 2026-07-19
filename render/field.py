@@ -29,6 +29,9 @@ out vec4 frag;
 uniform sampler2D field;     // RGB: r=|psi|^2 (peak-norm), g=cos(phase), b=sin(phase)
 uniform float gain;          // brightness gain
 uniform float gamma;         // brightness tone-curve exponent (>1 suppresses faint tails)
+uniform float pmax;          // this frame's peak |psi|^2 (texture r is peak-normalized)
+uniform float fog_floor;     // probability fog: min brightness where the ball can land
+uniform float fog_pmin;      // ...for cells with ABSOLUTE |psi|^2 above this
 vec3 hsv2rgb(vec3 c) {       // c = (hue, sat, val), all in [0,1]
     vec4 K = vec4(1.0, 2.0 / 3.0, 1.0 / 3.0, 3.0);
     vec3 p = abs(fract(c.xxx + K.xyz) * 6.0 - K.www);
@@ -37,6 +40,10 @@ vec3 hsv2rgb(vec3 c) {       // c = (hue, sat, val), all in [0,1]
 void main() {
     vec3 f = texture(field, uv).rgb;
     float v = clamp(pow(f.r, gamma) * gain, 0.0, 1.0);   // brightness = magnitude ONLY
+    // probability fog: the gamma curve hides ~1/3 of the Born-rule mass in
+    // near-black cells; give any cell with real absolute probability a dim
+    // floor so "where the ball can appear" is always visible.
+    v = max(v, fog_floor * step(fog_pmin, f.r * pmax));
     float h = atan(f.b, f.g) / 6.2831853 + 0.5;          // phase -> hue [0,1); interp'd via cos/sin -> no wrap seam
     frag = vec4(hsv2rgb(vec3(h, 1.0, v)), 1.0);          // low |psi|^2 -> black regardless of hue
 }
@@ -73,8 +80,15 @@ class FieldRenderer:
         self.field.repeat_x = self.field.repeat_y = False
         self.prog["gain"].value = cfg.field_gain
         self.prog["gamma"].value = cfg.field_gamma
+        self.prog["fog_floor"].value = cfg.fog_floor
+        self.prog["fog_pmin"].value = cfg.fog_pmin
+        self.prog["pmax"].value = 0.0
 
     def upload(self, mag, phase):
+
+
+
+        self.prog["pmax"].value = float(np.asarray(mag).max())
         self.field.write(field_bytes(mag, phase))
 
     def draw(self):

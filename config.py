@@ -51,6 +51,8 @@ class Config:
         1.4
     )
     field_gain: float = 1.0
+    fog_floor: float = 0.06
+    fog_pmin: float = 0.001
     bloom_threshold: float = 0.6
     bloom_intensity: float = 1.1
 
