@@ -26,6 +26,12 @@ from game.stream import StreamingResult, consume
 
 
 
+FLASH_FRAMES = 8
+DETECT_MSG_FRAMES = 25
+DETECTED_MSG = "DETECTED -- the hole fled"
+
+
+
 
 
 
@@ -67,6 +73,11 @@ class Loop:
         self._future = None
         self._abort = None
         self._rng = np.random.default_rng(1)
+
+
+
+
+        self._seed_rng = np.random.default_rng()
         self._walsh_counts = walsh_term_counts(cfg)
         self._gate_target = 0
         self._gate_shown = 0.0
@@ -93,11 +104,13 @@ class Loop:
                 self._course_builder, self.cfg, self.st.detector_cells
             )
 
-    def _run_stroke(self, course_future, p, out, abort):
+    def _run_stroke(self, course_future, p, seed, out, abort):
+        if abort.is_set():
+            return
         course = course_future.result()
         if abort.is_set():
             return
-        consume(stream_turn(course, p), out, abort)
+        consume(stream_turn(course, p, seed), out, abort)
 
 
     def on_aim(self, px, py):
@@ -133,6 +146,11 @@ class Loop:
         self.st.detector_cells = course.pick_detector_cells(
             self.cfg, self._detector_rng, self.st.lie
         )
+
+
+
+        if self._course_future is not None:
+            self._course_future.cancel()
         self._submit_course_build()
 
     def on_speed(self):
@@ -148,16 +166,22 @@ class Loop:
     def on_putt(self):
         if self.st.phase == Phase.AIMING:
             p = build_params(self.cfg, self.st)
+            seed = int(self._seed_rng.integers(1, 2**31 - 1))
             if self.cfg.streaming:
                 self._ensure_course_build()
                 self._abort = threading.Event()
                 self.result = StreamingResult()
                 self._future = self._pool.submit(
-                    self._run_stroke, self._course_future, p, self.result, self._abort
+                    self._run_stroke,
+                    self._course_future,
+                    p,
+                    seed,
+                    self.result,
+                    self._abort,
                 )
             else:
                 self._abort = None
-                self._future = self._pool.submit(run_turn, self.cfg, p)
+                self._future = self._pool.submit(run_turn, self.cfg, p, seed)
             self._gate_target = gate_count(
                 self.cfg, self.st.n_steps, self._walsh_counts
             )
@@ -202,9 +226,17 @@ class Loop:
 
 
 
+    def _frames_since_detection(self, frame):
+        r = self.result
+        fired = [s for s, hit in zip(r.detect_at_step, r.detections) if hit and s <= frame]
+        return frame - fired[-1] if fired else None
+
     def _tick(self, dt):
         if self._frame < len(self.result.snapshots) - 1:
             self._frame += 1
+            since = self._frames_since_detection(self._frame)
+            caught = since is not None and since < DETECT_MSG_FRAMES
+            self.st.message = DETECTED_MSG if caught else ""
             self._gate_shown = (
                 self._gate_target * len(self.result.snapshots) / max(self.st.n_steps, 1)
             )
@@ -235,7 +267,8 @@ class Loop:
             field_renderer.upload(
                 self.result.snapshots[frame], self.result.phase_snapshots[frame]
             )
-            flash = frame in self.result.detect_at_step
+            since = self._frames_since_detection(frame)
+            flash = since is not None and since < FLASH_FRAMES
             hole_idx = self.result.hole_trace[frame]
         elif st.phase in (Phase.WIN, Phase.LOSE) and self.result is not None:
             N = self.cfg.grid_n
