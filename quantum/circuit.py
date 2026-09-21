@@ -4,17 +4,27 @@ from pathlib import Path
 from guppylang.emulator.state import NotSingleStateError, PartialVector
 from selene_quest_plugin.state import SeleneQuestState
 from guppylang import guppy
-from guppylang.std.builtins import array, comptime, result
-from guppylang.std.quantum import qubit, measure, measure_array, discard_array
-from guppylang.std.debug import state_result
-
+from guppylang.std.builtins import array, comptime, output
+from guppylang.std.quantum import (
+    qubit,
+    measure,
+    measure_array,
+    discard_array,
+    collect_measurements,
+)
+from guppylang.std.debug import state_output
+from guppylang.emulator._args import validate_record
+from guppylang.emulator.instance import _to_provider_args
+from selene_argreader_plugin import ArgProvider
 
 from quantum.grid import n_qubits_per_axis
 from quantum.state_prep import (
     gaussian_amplitudes,
-    prepare_amplitudes_gates,
-    apply_prep_gates,
-    apply_kick,
+    prep_structure,
+    prep_angle_units,
+    kick_units,
+    apply_prep_angles,
+    apply_kick_angles,
 )
 from quantum.qft import qft, iqft
 from quantum.kinetic import kinetic_coeffs, apply_kinetic
@@ -73,30 +83,28 @@ def walsh_term_counts(cfg):
     return counts
 
 
-def build_turn(
-    cfg,
-    x0,
-    y0,
-    kx,
-    ky,
-    sigma_x,
-    sigma_y,
-    conditions,
-    n_steps,
-    detector_period,
-    detector_offset,
-    hole0=0,
-):
+@dataclass
+class Course:
+
+    cfg: object
+    inst: object
+    meta: dict
+
+
+def build_course(cfg, detector_cells, n_steps=None, warmup=False):
     n = n_qubits_per_axis(cfg.grid_n)
     N = cfg.grid_n
     nb = len(cfg.burrows)
     assert nb == 3, "this reference body is unrolled for exactly 3 burrows"
-    period = detector_period
-    offset = detector_offset
+    n_steps = cfg.n_steps_default if n_steps is None else n_steps
+    period = cfg.detector_period
+    offset = cfg.detector_offset
+    detector_cells = tuple(tuple(c) for c in detector_cells)
+    conditions = point_conditions(detector_cells, n)
+    K = 2**n - 1
+    structure = prep_structure(n)
 
 
-    px = prepare_amplitudes_gates(gaussian_amplitudes(N, x0, sigma_x, cfg.L))
-    py = prepare_amplitudes_gates(gaussian_amplitudes(N, y0, sigma_y, cfg.L))
     alpha, beta = kinetic_coeffs(N, cfg.dt, cfg.mass, cfg.L)
 
     def vhalf_terms(b):
@@ -114,11 +122,17 @@ def build_turn(
 
 
     @guppy.comptime
-    def prep_and_kick(reg: array[qubit, comptime(2 * n)]) -> None:
-        apply_prep_gates(reg[0:n], px)
-        apply_prep_gates(reg[n : 2 * n], py)
-        apply_kick(reg[0:n], kx, cfg.L, n)
-        apply_kick(reg[n : 2 * n], ky, cfg.L, n)
+    def prep_and_kick(
+        reg: array[qubit, comptime(2 * n)],
+        px_angles: array[float, comptime(K)],
+        py_angles: array[float, comptime(K)],
+        kickx: array[float, comptime(n)],
+        kicky: array[float, comptime(n)],
+    ) -> None:
+        apply_prep_angles(reg[0:n], structure, px_angles)
+        apply_prep_angles(reg[n : 2 * n], structure, py_angles)
+        apply_kick_angles(reg[0:n], kickx, n)
+        apply_kick_angles(reg[n : 2 * n], kicky, n)
 
     @guppy.comptime
     def vhalf0(reg: array[qubit, comptime(2 * n)]) -> None:
@@ -153,10 +167,16 @@ def build_turn(
 
 
     @guppy
-    def circuit() -> None:
+    def circuit(
+        px_angles: array[float, comptime(K)],
+        py_angles: array[float, comptime(K)],
+        kickx: array[float, comptime(n)],
+        kicky: array[float, comptime(n)],
+        hole0: int,
+    ) -> None:
         qs = array(qubit() for _ in range(comptime(2 * n)))
-        prep_and_kick(qs)
-        hole_idx: int = comptime(hole0)
+        prep_and_kick(qs, px_angles, py_angles, kickx, kicky)
+        hole_idx: int = hole0
         for t in range(comptime(n_steps)):
 
             if hole_idx == 0:
@@ -179,15 +199,15 @@ def build_turn(
                 flag = qubit()
                 anc = array(qubit() for _ in range(comptime(n_anc)))
                 detector_emit(qs, flag, anc)
-                detected = measure(flag)
+                detected = measure(flag).read()
                 if detected:
                     hole_idx = (hole_idx + 1) % comptime(nb)
-                result("det", detected)
+                output("det", detected)
                 discard_array(anc)
-            result("hole", hole_idx)
-            state_result("snap", qs)
-        result("hole_final", hole_idx)
-        result("land", measure_array(qs))
+            output("hole", hole_idx)
+            state_output("snap", qs)
+        output("hole_final", hole_idx)
+        output("land", collect_measurements(measure_array(qs)))
 
     meta = dict(
         n=n,
@@ -197,8 +217,20 @@ def build_turn(
         period=period,
         n_qubits=n_qubits,
         detector_steps=[t for t in range(n_steps) if t % period == offset],
+        detector_cells=detector_cells,
     )
-    return circuit, meta
+    inst = circuit.emulator(n_qubits=n_qubits).with_shots(1)
+    course = Course(cfg=cfg, inst=inst, meta=meta)
+    if warmup:
+        zeros = dict(
+            px_angles=[0.0] * K,
+            py_angles=[0.0] * K,
+            kickx=[0.0] * n,
+            kicky=[0.0] * n,
+            hole0=0,
+        )
+        inst.with_seed(0).run(**zeros)
+    return course
 
 
 def _snapshot_amp(vec, N):
@@ -270,63 +302,79 @@ class TurnEnd:
     final_hole_idx: int
 
 
-def stream_turn(cfg, params, seed=1):
+def turn_args(cfg, params):
     assert params.s > 0, "squash factor s must be positive"
     n = n_qubits_per_axis(cfg.grid_n)
-    conditions = point_conditions(params.detector_cells, n)
     root_s = params.s**0.5
-    circuit, meta = build_turn(
-        cfg,
-        params.x0,
-        params.y0,
-        params.kx,
-        params.ky,
-        cfg.sigma_0 / root_s,
-        cfg.sigma_0 * root_s,
-        conditions,
-        params.n_steps,
-        cfg.detector_period,
-        cfg.detector_offset,
-        hole0=params.hole_idx,
+    return dict(
+        px_angles=prep_angle_units(
+            gaussian_amplitudes(cfg.grid_n, params.x0, cfg.sigma_0 / root_s, cfg.L)
+        ),
+        py_angles=prep_angle_units(
+            gaussian_amplitudes(cfg.grid_n, params.y0, cfg.sigma_0 * root_s, cfg.L)
+        ),
+        kickx=kick_units(params.kx, cfg.L, n),
+        kicky=kick_units(params.ky, cfg.L, n),
+        hole0=int(params.hole_idx),
     )
-    N = meta["N"]
-    inst = circuit.emulator(n_qubits=meta["n_qubits"]).with_seed(seed).with_shots(1)
+
+
+def stream_turn(course, params, seed=1):
+    meta = course.meta
+    assert params.n_steps == meta["n_steps"], (
+        f"course compiled for n_steps={meta['n_steps']}, stroke asks {params.n_steps}"
+    )
+    assert tuple(tuple(c) for c in params.detector_cells) == meta["detector_cells"], (
+        "course compiled for a different detector layout"
+    )
+    args = turn_args(course.cfg, params)
+    n, N = meta["n"], meta["N"]
+    inst = course.inst.with_seed(seed)
 
 
 
-    stream = inst._run_instance()
-    shot = next(iter(stream))
-    det = None
-    hole = None
-    final_hole = None
-    try:
-        for tag, value in shot:
-            if tag == "det":
-                det = bool(value)
-            elif tag == "hole":
-                hole = int(value)
-            elif tag == "STATE:snap":
-                state = SeleneQuestState.parse_from_file(Path(value), cleanup=True)
-                amp = _snapshot_amp(PartialVector._from_inner(state), N)
-                yield StepFrame(
-                    prob=np.abs(amp) ** 2,
-                    phase=stabilized_phase(amp),
-                    hole_idx=hole,
-                    det=det,
-                )
-                det = None
-            elif tag == "hole_final":
-                final_hole = int(value)
-            elif tag == "land":
-                bits = [int(b) for b in value]
-                jx = int("".join(str(b) for b in bits[:n]), 2)
-                jy = int("".join(str(b) for b in bits[n:]), 2)
-                yield TurnEnd(landing=(jx, jy), final_hole_idx=final_hole)
-    finally:
+    validate_record(inst._arg_specs, args)
+    provider = ArgProvider()
+    provider.set_constant_args(**_to_provider_args(args))
 
 
-        shot.close()
-        stream.close()
+
+    with provider:
+
+
+        stream = inst._run_instance()
+        shot = next(iter(stream))
+        det = None
+        hole = None
+        final_hole = None
+        try:
+            for tag, value in shot:
+                if tag == "det":
+                    det = bool(value)
+                elif tag == "hole":
+                    hole = int(value)
+                elif tag == "STATE:snap":
+                    state = SeleneQuestState.parse_from_file(Path(value), cleanup=True)
+                    amp = _snapshot_amp(PartialVector._from_inner(state), N)
+                    yield StepFrame(
+                        prob=np.abs(amp) ** 2,
+                        phase=stabilized_phase(amp),
+                        hole_idx=hole,
+                        det=det,
+                    )
+                    det = None
+                elif tag == "hole_final":
+                    final_hole = int(value)
+                elif tag == "land":
+                    bits = [int(b) for b in value]
+                    jx = int("".join(str(b) for b in bits[:n]), 2)
+                    jy = int("".join(str(b) for b in bits[n:]), 2)
+                    yield TurnEnd(landing=(jx, jy), final_hole_idx=final_hole)
+        finally:
+
+
+            shot.close()
+            stream.close()
 
 
 
@@ -373,7 +421,8 @@ def stream_turn(cfg, params, seed=1):
 
 
 def run_turn(cfg, params, seed=1):
-    items = list(stream_turn(cfg, params, seed))
+    course = build_course(cfg, params.detector_cells, n_steps=params.n_steps)
+    items = list(stream_turn(course, params, seed))
     frames = [f for f in items if isinstance(f, StepFrame)]
     tail = items[-1]
     assert isinstance(tail, TurnEnd), "complete flight must end in TurnEnd"

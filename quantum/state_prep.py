@@ -4,8 +4,8 @@ import math
 from guppylang import guppy
 from guppylang.std.builtins import array, comptime
 from guppylang.std.quantum import qubit, ry, cx, discard_array, h, rz
-from guppylang.std.angles import pi
-from guppylang.std.debug import state_result
+from guppylang.std.angles import pi, angle
+from guppylang.std.debug import state_output
 
 
 def gaussian_amplitudes(N, x0, sigma, L) -> list[float]:
@@ -108,6 +108,42 @@ def apply_kick(reg, k, L, n):
         rz(reg[b], pi * comptime(k * (L / N) * 2 ** (n - 1 - b) / math.pi))
 
 
+def prep_structure(n) -> list:
+    flat = [1.0 / 2 ** (n / 2)] * (2**n)
+    out, slot = [], 0
+    for op in prepare_amplitudes_gates(flat):
+        if op[0] == "ry":
+            out.append(("ry", op[1], slot))
+            slot += 1
+        else:
+            out.append(op)
+    return out
+
+
+def prep_angle_units(amps) -> list:
+    return [
+        float(op[2] / math.pi) for op in prepare_amplitudes_gates(amps) if op[0] == "ry"
+    ]
+
+
+def kick_units(k, L, n) -> list:
+    N = 2**n
+    return [float(k * (L / N) * 2 ** (n - 1 - b) / math.pi) for b in range(n)]
+
+
+def apply_prep_angles(reg, structure, angles):
+    for op in structure:
+        if op[0] == "ry":
+            ry(reg[op[1]], angle(angles[op[2]]))
+        else:
+            cx(reg[op[1]], reg[op[2]])
+
+
+def apply_kick_angles(reg, kick, n):
+    for b in range(n):
+        rz(reg[b], angle(kick[b]))
+
+
 def make_prep_circuit(amps):
     n = int(round(math.log2(len(amps))))
     gates = prepare_amplitudes_gates(amps)
@@ -120,7 +156,7 @@ def make_prep_circuit(amps):
     def circuit() -> None:
         qs = array(qubit() for _ in range(comptime(n)))
         prep(qs)
-        state_result("psi", qs)
+        state_output("psi", qs)
         discard_array(qs)
 
     return circuit
@@ -137,7 +173,7 @@ def make_kick_only_circuit(k, L, n):
         for i in range(comptime(n)):
             h(qs[i])
         kick(qs)
-        state_result("psi", qs)
+        state_output("psi", qs)
         discard_array(qs)
 
     return circuit

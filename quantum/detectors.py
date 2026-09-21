@@ -1,6 +1,6 @@
 
 from guppylang import guppy
-from guppylang.std.builtins import array, comptime, result
+from guppylang.std.builtins import array, comptime, output
 from guppylang.std.quantum import (
     qubit,
     x,
@@ -125,73 +125,6 @@ def detector_flip_box(reg, tiles, flag, anc):
         detector_flip_q(reg, tile, flag, anc)
 
 
-def make_detector_probe_circuit(cfg, j, k, hole_idx, conditions):
-    n = n_qubits_per_axis(cfg.grid_n)
-    kc = len(conditions)
-    n_anc = max(0, kc - 2)
-    nb = len(cfg.burrows)
-    h0 = hole_idx
-
-    @guppy.comptime
-    def seed_and_flip(
-        reg: array[qubit, comptime(2 * n)],
-        flag: qubit,
-        anc: array[qubit, comptime(n_anc)],
-    ) -> None:
-        for i in range(n):
-            if (j >> (n - 1 - i)) & 1:
-                x(reg[i])
-            if (k >> (n - 1 - i)) & 1:
-                x(reg[n + i])
-        detector_flip_q(reg, conditions, flag, anc)
-
-    @guppy
-    def circuit() -> None:
-        qs = array(qubit() for _ in range(comptime(2 * n)))
-        flag = qubit()
-        anc = array(qubit() for _ in range(comptime(n_anc)))
-        seed_and_flip(qs, flag, anc)
-        detected = measure(flag)
-        hidx: int = comptime(h0)
-        if detected:
-            hidx = (hidx + 1) % comptime(nb)
-        result("detected", detected)
-        result("hole_idx", hidx)
-        discard_array(qs)
-        discard_array(anc)
-
-    return circuit
-
-
-
-
-
-def make_detector_test_circuit(jx, jy, conditions):
-    n = 4
-    k = len(conditions)
-    flag = 2 * n
-    anc = [2 * n + 1 + j for j in range(max(0, k - 2))]
-    nq = 2 * n + 1 + max(0, k - 2)
-
-    @guppy.comptime
-    def setup(reg: array[qubit, comptime(nq)]) -> None:
-        for i in range(n):
-            if (jx >> (n - 1 - i)) & 1:
-                x(reg[i])
-            if (jy >> (n - 1 - i)) & 1:
-                x(reg[n + i])
-        detector_flip(reg, conditions, flag, anc)
-
-    @guppy
-    def circuit() -> None:
-        qs = array(qubit() for _ in range(comptime(nq)))
-        setup(qs)
-        ms = measure_array(qs)
-        result("detected", ms[comptime(flag)])
-
-    return circuit
-
-
 
 
 
@@ -224,9 +157,9 @@ def make_mcx_test_circuit(pattern):
         qs = array(qubit() for _ in range(comptime(7)))
         setup(qs)
         ms = measure_array(qs)
-        result("target", ms[4])
-        result("anc0", ms[5])
-        result("anc1", ms[6])
+        output("target", ms[4].read())
+        output("anc0", ms[5].read())
+        output("anc1", ms[6].read())
 
     return circuit
 
@@ -255,7 +188,7 @@ def make_detector_test_circuit(jx, jy, conditions):
         qs = array(qubit() for _ in range(comptime(nq)))
         setup(qs)
         ms = measure_array(qs)
-        result("detected", ms[comptime(flag)])
+        output("detected", ms[comptime(flag)].read())
 
     return circuit
 
@@ -286,12 +219,12 @@ def make_detector_probe_circuit(cfg, j, k, hole_idx, conditions):
         flag = qubit()
         anc = array(qubit() for _ in range(comptime(n_anc)))
         seed_and_flip(qs, flag, anc)
-        detected = measure(flag)
+        detected = measure(flag).read()
         hidx: int = comptime(h0)
         if detected:
             hidx = (hidx + 1) % comptime(nb)
-        result("detected", detected)
-        result("hole_idx", hidx)
+        output("detected", detected)
+        output("hole_idx", hidx)
         discard_array(qs)
         discard_array(anc)
 

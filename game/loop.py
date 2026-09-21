@@ -13,7 +13,13 @@ from game.mechanics import (
     tick_counter,
 )
 from quantum.preview import preview_field
-from quantum.circuit import run_turn, TurnParams, walsh_term_counts, stream_turn
+from quantum.circuit import (
+    run_turn,
+    TurnParams,
+    walsh_term_counts,
+    stream_turn,
+    build_course,
+)
 import threading
 
 from game.stream import StreamingResult, consume
@@ -50,7 +56,7 @@ def build_params(cfg, st):
 
 
 class Loop:
-    def __init__(self, cfg, size=(768, 820)):
+    def __init__(self, cfg, size=(768, 820), course_builder=None):
         self.cfg = cfg
         self.st = GameState(n_steps=cfg.n_steps_default)
         self._detector_rng = np.random.default_rng()
@@ -68,6 +74,30 @@ class Loop:
         self.st.detector_cells = course.pick_detector_cells(
             cfg, self._detector_rng, self.st.lie
         )
+
+
+
+
+        self._course_builder = course_builder or (
+            lambda cfg, cells: build_course(cfg, cells, warmup=True)
+        )
+        self._course_future = None
+
+    def _ensure_course_build(self):
+        if self._course_future is None:
+            self._submit_course_build()
+
+    def _submit_course_build(self):
+        if self.cfg.streaming:
+            self._course_future = self._pool.submit(
+                self._course_builder, self.cfg, self.st.detector_cells
+            )
+
+    def _run_stroke(self, course_future, p, out, abort):
+        course = course_future.result()
+        if abort.is_set():
+            return
+        consume(stream_turn(course, p), out, abort)
 
 
     def on_aim(self, px, py):
@@ -103,6 +133,7 @@ class Loop:
         self.st.detector_cells = course.pick_detector_cells(
             self.cfg, self._detector_rng, self.st.lie
         )
+        self._submit_course_build()
 
     def on_speed(self):
         speeds = (0.5, 1.0, 2.0)
@@ -118,10 +149,11 @@ class Loop:
         if self.st.phase == Phase.AIMING:
             p = build_params(self.cfg, self.st)
             if self.cfg.streaming:
+                self._ensure_course_build()
                 self._abort = threading.Event()
                 self.result = StreamingResult()
                 self._future = self._pool.submit(
-                    consume, stream_turn(self.cfg, p), self.result, self._abort
+                    self._run_stroke, self._course_future, p, self.result, self._abort
                 )
             else:
                 self._abort = None
@@ -231,3 +263,4 @@ class Loop:
             gate_target=self._gate_target,
             speed=self._speed,
         )
+        self._ensure_course_build()

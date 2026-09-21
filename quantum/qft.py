@@ -3,7 +3,7 @@ from guppylang import guppy
 from guppylang.std.builtins import array, comptime
 from guppylang.std.quantum import qubit, h, rz, crz, cx, x, discard_array
 from guppylang.std.angles import pi
-from guppylang.std.debug import state_result
+from guppylang.std.debug import state_output
 from guppylang.std.mem import mem_swap
 
 
@@ -49,7 +49,7 @@ def make_qft_on_basis_state(j0, n):
     def circuit() -> None:
         qs = array(qubit() for _ in range(comptime(n)))
         body(qs)
-        state_result("psi", qs)
+        state_output("psi", qs)
         discard_array(qs)
 
     return circuit
@@ -69,7 +69,7 @@ def make_qft_iqft_roundtrip(j0, n):
     def circuit() -> None:
         qs = array(qubit() for _ in range(comptime(n)))
         body(qs)
-        state_result("psi", qs)
+        state_output("psi", qs)
         discard_array(qs)
 
     return circuit

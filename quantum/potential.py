@@ -5,7 +5,7 @@ from guppylang import guppy
 from guppylang.std.builtins import array, comptime
 from guppylang.std.quantum import qubit, h, rz, cx, discard_array
 from guppylang.std.angles import pi
-from guppylang.std.debug import state_result
+from guppylang.std.debug import state_output
 
 
 def walsh_terms(phi_by_position, n, tol):
@@ -60,7 +60,7 @@ def make_potential_test_circuit(phi_by_position, n, tol):
     def circuit() -> None:
         qs = array(qubit() for _ in range(comptime(n)))
         stage(qs)
-        state_result("psi", qs)
+        state_output("psi", qs)
         discard_array(qs)
 
     return circuit

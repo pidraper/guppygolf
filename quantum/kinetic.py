@@ -5,7 +5,7 @@ from guppylang import guppy
 from guppylang.std.builtins import array, comptime
 from guppylang.std.quantum import qubit, h, rz, crz, discard_array
 from guppylang.std.angles import pi
-from guppylang.std.debug import state_result
+from guppylang.std.debug import state_output
 from quantum.qft import cphase
 
 
@@ -54,7 +54,7 @@ def make_kinetic_test_circuit(N, dt, mass, L):
     def circuit() -> None:
         qs = array(qubit() for _ in range(comptime(n)))
         stage(qs)
-        state_result("psi", qs)
+        state_output("psi", qs)
         discard_array(qs)
 
     return circuit

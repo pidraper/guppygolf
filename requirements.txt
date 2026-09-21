@@ -1,4 +1,6 @@
-guppylang==0.21.16
+guppylang==1.0.4
+selene-sim==0.3.2
+selene-core==0.3.2
 numpy==2.4.6
 pyglet==2.1.14
 moderngl==5.12.0
