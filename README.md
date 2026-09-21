@@ -1,8 +1,8 @@
 # Quantum Golf
 
-Mini-golf at large hbar. The ball is a Gaussian wavepacket, putted across a two-dimensional potential on a 16×16 grid. Each game compiles one quantum circuit in Guppy. Each stroke runs it once on the Selene emulator,[^1] with the aim passed in as runtime arguments, and reads the packet back at every step. Brightness = |ψ|², hue = phase.  The stopping point is sampled from |ψ|².
+Mini-golf at large hbar. The ball is a Gaussian wavepacket on a 16×16 grid. The game is compiled as a quantum circuit in Guppy and each putt runs the circuit on the Selene emulator[^1]. Brightness = |ψ|², hue = phase.  The stopping point is sampled from |ψ|².
 
-Some angry detectors guard the course, making periodic local measurements. When a mid-circuit measurement finds the packet inside a watched cell, the hole flees to another burrow.
+Some angry detectors guard the course, making periodic local measurements. When a mid-circuit measurement detects the packet, the hole flees to another spot.
 
 ## Install
 
@@ -11,10 +11,10 @@ pip install -r requirements.txt
 python main.py
 ```
 
-Python 3.12 or 3.13 is required, together with a display and OpenGL 3.3.
+Python 3.12 or 3.13 and OpenGL 3.3 required.
 
 ## Controls
 
-The mouse location controls aiming and power. Scroll to squeeze the packet along one axis,  Click to putt and to measure early.  `R` to reset.
+The mouse location controls aiming and power. Scroll to squeeze the packet along one axis, click to putt and to measure early.  `R` to reset.
 
-[^1]: Guppy and Selene are Quantinuum's quantum programming language and emulator. The circuit is ordinary Python.
+[^1]: Guppy and Selene are Quantinuum's quantum programming language and emulator. 
