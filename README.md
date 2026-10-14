@@ -6,9 +6,9 @@ Some angry detectors guard the course, making periodic local measurements. When 
 
 ## Install
 
-```
-pip install -r requirements.txt
-python main.py
+```bash
+uv sync
+uv run main.py
 ```
 
 Python 3.12 or 3.13 and OpenGL 3.3 required.
@@ -17,6 +17,6 @@ Python 3.12 or 3.13 and OpenGL 3.3 required.
 
 The mouse location controls aiming and power. Scroll to squeeze the packet
 along one axis, click to putt and to measure early. Currently two holes are
-implements. Max 10 strokes/hole. `R` to reset.
+implemented. Max 10 strokes/hole. `R` to reset.
 
-[^1]: Guppy and Selene are Quantinuum's quantum programming language and emulator. 
+[^1]: Guppy and Selene are Quantinuum's quantum programming language and emulator.
